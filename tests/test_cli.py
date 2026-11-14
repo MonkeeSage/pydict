@@ -71,10 +71,19 @@ def test_background_option() -> None:
 def test_serve_command(fruit_ifo: Path) -> None:
     args = cli.build_parser().parse_args(
         ["--serve", "-d", str(fruit_ifo), "-u", "Fruit Book", "--no-cache", "--no-color",
-         "--", "-word"]
+         "--focus", "definition", "--", "-word"]
     )
     argv = shlex.split(cli.serve_command(args))
     assert argv[:3] == [sys.executable, "-m", "pydict"]
     assert argv[3:] == ["--dict", str(fruit_ifo.resolve()), "--use-dict", "Fruit Book",
-                        "--no-cache", "--no-color", "--", "-word"]
+                        "--no-cache", "--no-color", "--focus", "definition", "--", "-word"]
     assert cli.build_parser().parse_args(argv[3:]).word == "-word"
+
+
+def test_focus_option() -> None:
+    parser = cli.build_parser()
+    assert parser.parse_args(["word"]).focus is None
+    assert parser.parse_args(["--focus", "wordlist", "word"]).focus == "wordlist"
+    assert set(cli.FOCUS_CHOICES) == {"wordlist", "definition"}
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--focus", "lookup"])

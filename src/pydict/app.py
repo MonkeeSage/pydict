@@ -9,7 +9,7 @@ from pathlib import Path
 from rich._wrap import divide_line
 from rich.style import Style
 from rich.text import Text
-from textual import on, work
+from textual import events, on, work
 from textual.color import Color
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -59,9 +59,27 @@ class LookupInput(Input):
         *PAGE_BINDINGS,
     ]
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._focusing_click = False
+
     def action_word_list(self, action: str) -> None:
         words = self.app.query_one("#words", OptionList)
         getattr(words, f"action_{action}")()
+
+    # Focusing by tab selects all the text; make a click that focuses the box
+    # do the same (Input moves the cursor to the click instead), unless the
+    # click selected some text by dragging.
+
+    def focus_on_click(self) -> bool:
+        # Called just before a mouse press focuses the widget.
+        self._focusing_click = not self.has_focus
+        return super().focus_on_click()
+
+    def on_mouse_up(self, event: events.MouseUp) -> None:
+        if self._focusing_click and self.select_on_focus and self.selection.is_empty:
+            self.select_all()
+        self._focusing_click = False
 
 
 class WordList(OptionList):
@@ -100,6 +118,7 @@ class PyDictApp(App[None]):
         self,
         dictionaries: list[DictInfo],
         word: str = "",
+        focus: str | None = None,
         clipboard_mode: str = "auto",
         cache_dir: Path | None = None,
         warnings: list[str] | None = None,
@@ -118,6 +137,7 @@ class PyDictApp(App[None]):
             self._filters.append(NoColor())
         self.dict_infos = dictionaries
         self.initial_word = word
+        self.result_focus = focus  # id of the widget to focus after a lookup (--focus)
         self.clipboard_mode = clipboard_mode
         self.cache_dir = cache_dir
         self.warnings = warnings or []
@@ -208,10 +228,11 @@ class PyDictApp(App[None]):
         pane = self.query_one("#definition", VerticalScroll)
         pane.border_subtitle = f"{count} dictionar{'y' if count == 1 else 'ies'}"
         self.search()
-        # A word from the command line is looked up as if enter was pressed.
+        # After looking up a word from the command line, focus the word list
+        # or definition if asked to (and something was found).
         words = self.query_one("#words", OptionList)
-        if self.initial_word.strip() and words.option_count:
-            words.focus()
+        if self.result_focus and self.initial_word.strip() and words.option_count:
+            self.query_one(f"#{self.result_focus}").focus()
 
     # -- searching ----------------------------------------------------------
 
@@ -232,7 +253,7 @@ class PyDictApp(App[None]):
             self.search()
         words = self.query_one("#words", OptionList)
         if words.option_count:
-            words.focus()
+            self.query_one(f"#{self.result_focus or 'words'}").focus()
 
     def search(self) -> None:
         """Fill the word list from the lookup box."""

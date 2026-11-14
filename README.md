@@ -15,6 +15,7 @@ pipx install '.[web]'     # with browser mode
 ```sh
 pydict                    # search all dictionaries sdcv would find
 pydict serendipity        # start with a word looked up
+pydict --focus definition serendipity   # ...and focus the definition
 pydict -l                 # list dictionaries
 pydict -d ~/dicts/oed     # use only this dictionary (no search)
 pydict --serve            # serve the app at http://localhost:8000
@@ -29,7 +30,7 @@ definition of the highlighted word is shown on the right.
 | tab / shift+tab | move between the lookup box, word list and definition |
 | up / down (in the lookup box) | move through the word list |
 | page up / page down | scroll the definition |
-| enter | lookup box → word list → definition |
+| enter | lookup box → word list (or definition, with `--focus definition`) → definition |
 | left / right (in the definition) | select the previous / next cross reference |
 | enter (on a cross reference) | look up the word it points to |
 | backspace (in the word list or definition) | go back to where the last cross reference was followed from |

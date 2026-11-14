@@ -13,6 +13,9 @@ from pydict.stardict import DictInfo, DictionaryError, discover, parse_ifo, reso
 from pydict.stardict.discovery import select_dicts
 from pydict.stardict.index import default_cache_dir
 
+# --focus values and the widgets they focus.
+FOCUS_CHOICES = {"wordlist": "words", "definition": "definition"}
+
 EPILOG = """\
 Dictionaries are found much like sdcv finds them: recursively in
 ~/.stardict/dic and $XDG_DATA_HOME/stardict/dic, then in --data-dir,
@@ -77,6 +80,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="don't use colors (also when $NO_COLOR is set and not empty)",
     )
     parser.add_argument(
+        "--focus", choices=FOCUS_CHOICES, default=None,
+        help="where enter in the lookup box moves the focus (default: wordlist), and "
+        "where the focus goes after looking up the word given on the command line "
+        "(default: it stays in the lookup box)",
+    )
+    parser.add_argument(
         "--no-cache", action="store_true", help="don't cache index offsets on disk"
     )
     web = parser.add_argument_group("browser mode (needs pydict[web])")
@@ -124,6 +133,8 @@ def serve_command(args: argparse.Namespace) -> str:
         argv.append("--no-cache")
     if args.no_color:
         argv.append("--no-color")
+    if args.focus:
+        argv += ["--focus", args.focus]
     if args.word:
         argv += ["--", args.word]
     return shlex.join(argv)
@@ -181,6 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     app = PyDictApp(
         infos,
         word=args.word,
+        focus=FOCUS_CHOICES[args.focus] if args.focus else None,
         clipboard_mode=clipboard_mode,
         cache_dir=None if args.no_cache else default_cache_dir(),
         warnings=warnings,

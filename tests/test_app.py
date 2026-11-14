@@ -90,8 +90,6 @@ async def test_tab_navigation(fruit_ifo: Path) -> None:
     app = make_app(fruit_ifo, word="ap")
     async with app.run_test() as pilot:
         await settle(pilot, app)
-        assert app.focused.id == "words"
-        await pilot.press("shift+tab")
         assert app.focused.id == "lookup"
         await pilot.press("tab")
         assert app.focused.id == "words"
@@ -122,6 +120,30 @@ async def test_page_keys_scroll_definition(tmp_path: Path) -> None:
             await pilot.press("pageup")
             await pilot.pause()
             assert pane.scroll_y == 0
+
+
+async def test_enter_follows_focus_option(fruit_ifo: Path) -> None:
+    app = make_app(fruit_ifo, focus="definition")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        await pilot.press(*"ap", "enter")
+        await settle(pilot, app)
+        assert app.focused.id == "definition"
+
+
+async def test_click_into_lookup_selects_text(fruit_ifo: Path) -> None:
+    from textual.widgets.input import Selection
+
+    app = make_app(fruit_ifo, word="apple")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        lookup = app.query_one("#lookup")
+        app.query_one("#words").focus()
+        await pilot.click("#lookup", offset=(4, 1))
+        assert app.focused is lookup
+        assert lookup.selection == Selection(0, 5)  # like focusing with tab
+        await pilot.click("#lookup", offset=(4, 1))  # already focused: moves the cursor
+        assert lookup.selection.is_empty
 
 
 async def test_enter_moves_focus(fruit_ifo: Path) -> None:
@@ -432,10 +454,15 @@ def test_parser_reports_back_button() -> None:
     assert isinstance(click, events.MouseDown) and click.button == 1
 
 
-@pytest.mark.parametrize(("word", "focus"), [("ap", "words"), ("", "lookup"), ("zzzzzz", "lookup")])
-async def test_initial_focus(fruit_ifo: Path, word: str, focus: str) -> None:
-    # A word from the command line focuses the word list, like enter does.
-    app = make_app(fruit_ifo, word=word)
+@pytest.mark.parametrize(("word", "focus", "expected"), [
+    ("ap", None, "lookup"),
+    ("ap", "words", "words"),
+    ("ap", "definition", "definition"),
+    ("", "words", "lookup"),  # nothing looked up
+    ("zzzzzz", "definition", "lookup"),  # nothing found
+])
+async def test_initial_focus(fruit_ifo: Path, word: str, focus: str | None, expected: str) -> None:
+    app = make_app(fruit_ifo, word=word, focus=focus)
     async with app.run_test() as pilot:
         await settle(pilot, app)
-        assert app.focused.id == focus
+        assert app.focused.id == expected
