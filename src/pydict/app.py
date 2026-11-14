@@ -209,6 +209,12 @@ class PyDictApp(App[None]):
         variables[colors.INPUT_FOCUS_BORDER_VARIABLE] = (
             focus_color.hex if focus_color else variables["border"]
         )
+        if focus_color:
+            # Textual's scrollbar colors, with focus_color in place of $primary.
+            behind = Color.parse(variables["background-darken-1"])
+            variables["scrollbar"] = (behind + focus_color.with_alpha(0.4)).hex
+            variables["scrollbar-hover"] = (behind + focus_color.with_alpha(0.5)).hex
+            variables["scrollbar-active"] = focus_color.hex
         return variables
 
     def compose(self) -> ComposeResult:

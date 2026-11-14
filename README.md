@@ -97,8 +97,8 @@ answer the query, pass `--background dark`, `--background light` or
 `--background '#fdf6e3'`.
 
 `--focus-color COLOR` sets the border color of the focused lookup box, word
-list, definition or find box (any CSS color, such as `orange` or
-`'#d33682'`). It's used as given, without adjusting its contrast.
+list, definition or find box, and the color of the scrollbars (any CSS
+color, such as `orange` or `'#d33682'`). It's used as given, without adjusting its contrast.
 
 tmux draws italics as reverse video when its `default-terminal` is `screen`
 or `screen-*`, so pydict leaves italics out there. To get italics back (in

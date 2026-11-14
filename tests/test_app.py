@@ -92,6 +92,8 @@ async def test_focus_color(fruit_ifo: Path, focus_color: str | None) -> None:
             widget.focus()
             await pilot.pause()
             assert widget.styles.border_top[1] == expected, selector
+        scrollbar = app.query_one("#definition").styles.scrollbar_color_active
+        assert scrollbar == Color.parse(focus_color or variables["primary"])
 
 
 async def test_initial_word_and_fuzzy(fruit_ifo: Path) -> None:

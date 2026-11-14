@@ -86,7 +86,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--focus-color", metavar="COLOR", type=color_arg,
-        help="the border color of the focused pane or text box, such as 'orange' "
+        help="the border color of the focused pane or text box, and the scrollbar "
+        "color, such as 'orange' "
         "or '#d33682' (default: the theme's colors)",
     )
     parser.add_argument(
