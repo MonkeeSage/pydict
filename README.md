@@ -33,6 +33,10 @@ definition of the highlighted word is shown on the right.
 | enter | lookup box → word list (or definition, with `--focus definition`) → definition |
 | left / right (in the definition) | select the previous / next cross reference |
 | enter (on a cross reference) | look up the word it points to |
+| / (in the definition) | find text in the definition, highlighting matches as you type |
+| up / down (in the find box) | go to the previous / next match (or click ▲ / ▼) |
+| enter / escape (in the find box) | close it, keeping / clearing the highlights |
+| n / N (in the definition) | go to the next / previous match |
 | backspace (in the word list or definition) | go back to where the last cross reference was followed from |
 | ctrl+c | copy the displayed definition as plain text |
 | ctrl+q / escape | quit |
@@ -42,6 +46,11 @@ looks it up. Cross references are `bword://` links in HTML dictionaries and
 `<kref>` tags in XDXF ones. The mouse's back button goes back like backspace
 does, in terminals that report it (pydict reads xterm's button 8). Typing a new
 word in the lookup box starts over.
+
+Finding ignores case and wraps around at the top and bottom of the
+definition. When the current match has been scrolled out of view, `n` and `N`
+start from the matches in view. Looking up another word clears the highlights
+unless the find box is open.
 
 ### Finding dictionaries
 

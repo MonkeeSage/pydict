@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from bisect import bisect_right
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,13 +14,13 @@ from textual import events, on, work
 from textual.color import Color
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.filter import Monochrome, NoColor
 from textual.timer import Timer
 from textual.widgets import Footer, Input, OptionList, Static
 
 from pydict import clipboard, colors, mouse
-from pydict.colors import readable
+from pydict.colors import DARK, LIGHT, is_dark, readable
 from pydict.render import Link, Palette, find_links, render_results
 from pydict.stardict import DictInfo, Dictionary, DictionaryError, Library
 
@@ -93,14 +94,44 @@ class WordList(OptionList):
 
 
 class DefinitionPane(VerticalScroll):
-    """The definition. Left/right select a cross reference, enter looks it up."""
+    """The definition. Left/right select a cross reference, enter looks it up,
+    / finds text and n / N go to the next / previous match.
+    """
 
     BINDINGS = [
         Binding("right", "app.select_link(1)", "Links", key_display="←→"),
         Binding("left", "app.select_link(-1)", "Previous link", show=False),
         Binding("enter", "app.follow_selected_link", "Look up"),
+        Binding("slash", "app.open_find", "Find", key_display="/"),
+        Binding("n", "app.find_step(1)", "Next match"),
+        Binding("N", "app.find_step(-1)", "Previous match", show=False),
         BACK_BINDING,
     ]
+
+
+class FindInput(Input):
+    """The find box. Up/down go to the previous/next match, enter closes it
+    and keeps the matches highlighted, escape closes it and clears them.
+    """
+
+    BINDINGS = [
+        Binding("down", "app.find_step(1)", "Next", key_display="↓"),
+        Binding("up", "app.find_step(-1)", "Previous", key_display="↑"),
+        Binding("escape", "app.close_find(True)", "Cancel"),
+        *PAGE_BINDINGS,
+    ]
+
+
+class FindArrow(Static):
+    """A button next to the find box that goes to the next or previous match."""
+
+    def __init__(self, label: str, step: int, **kwargs) -> None:
+        super().__init__(label, **kwargs)
+        self.step = step
+
+    def on_click(self, event: events.Click) -> None:
+        event.stop()
+        self.app.action_find_step(self.step)
 
 
 class PyDictApp(App[None]):
@@ -152,7 +183,11 @@ class PyDictApp(App[None]):
         self._text = Text()  # the displayed definition, without the link cursor
         self._links: list[Link] = []  # cross references in it
         self._link: int | None = None  # index of the selected one
-        self._link_lines: tuple[int, list[int]] | None = None  # (width, line of each link)
+        self._matches: list[tuple[int, int]] = []  # (start, end) of each find match
+        self._match: int | None = None  # index of the current one
+        self._find_top = 0  # first visible line when the find box was opened
+        # "links" or "matches" -> (width, line of each); see _lines_of
+        self._lines: dict[str, tuple[int, list[int]]] = {}
         self._history: list[Place] = []  # places left by following cross references
         self._shown_word: str | None = None
         self._search_timer: Timer | None = None
@@ -165,8 +200,14 @@ class PyDictApp(App[None]):
         yield LookupInput(placeholder="Look up a word…", id="lookup")
         with Horizontal(id="results"):
             yield WordList(id="words")
-            with DefinitionPane(id="definition"):
-                yield Static(id="definition-text")
+            with Vertical(id="definition-column"):
+                with DefinitionPane(id="definition"):
+                    yield Static(id="definition-text")
+                with Horizontal(id="find-bar"):
+                    yield FindInput(placeholder="Find…", id="find")
+                    yield FindArrow("▲", -1, id="find-previous")
+                    yield FindArrow("▼", 1, id="find-next")
+                    yield Static(id="find-count")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -320,16 +361,26 @@ class PyDictApp(App[None]):
         self._text = text
         self._links = find_links(text)
         self._link = None
-        self._link_lines = None
-        self._update_definition()
+        self._lines.clear()
+        self._find_top = 0
+        # Matches are kept while the find box is open, cleared otherwise.
+        self._find(self._find_query() if self._find_open() else "")
         self.query_one("#definition", VerticalScroll).scroll_home(animate=False, immediate=True)
         self.refresh_bindings()
 
     def _update_definition(self) -> None:
         text = self._text
+        if self._matches or self._link is not None:
+            text = text.copy()
+        if self._matches:
+            style = self._match_style()
+            for start, end in self._matches:
+                text.stylize(style, start, end)
+            if self._match is not None:
+                start, end = self._matches[self._match]
+                text.stylize(Style(bold=True, underline=True), start, end)
         if self._link is not None:
             link = self._links[self._link]
-            text = text.copy()
             text.stylize(self.palette().resolve(Style(bold=True, reverse=True)), link.start, link.end)
         self.query_one("#definition-text", Static).update(text)
 
@@ -346,28 +397,40 @@ class PyDictApp(App[None]):
             return self._link is not None
         if action == "back":
             return bool(self._history)
+        if action == "find_step":
+            return bool(self._matches)
         return True
 
-    def _lines_of_links(self) -> list[int]:
-        """The line each link starts on, as wrapped in the definition pane."""
+    def _lines_of(self, kind: str) -> list[int]:
+        """The line each link or find match (``kind`` "links" or "matches")
+        starts on, as wrapped in the definition pane.
+        """
         width = self.query_one("#definition-text", Static).content_size.width
-        if self._link_lines is not None and self._link_lines[0] == width:
-            return self._link_lines[1]
+        cached = self._lines.get(kind)
+        if cached is not None and cached[0] == width:
+            return cached[1]
+        if kind == "links":
+            offsets = [link.start for link in self._links]
+        else:
+            offsets = [start for start, _ in self._matches]
         # Wrap the way Textual wraps the Static's content.
         lines: list[int] = []
         y = start = 0
-        links = iter(self._links)
-        link = next(links, None)
+        it = iter(offsets)
+        offset = next(it, None)
         for line in self.definition.split("\n"):
             end = start + len(line)
             breaks = divide_line(line, max(width, 1), fold=True)
-            while link is not None and link.start <= end:
-                lines.append(y + bisect_right(breaks, link.start - start))
-                link = next(links, None)
+            while offset is not None and offset <= end:
+                lines.append(y + bisect_right(breaks, offset - start))
+                offset = next(it, None)
             y += len(breaks) + 1
             start = end + 1
-        self._link_lines = (width, lines)
+        self._lines[kind] = (width, lines)
         return lines
+
+    def _lines_of_links(self) -> list[int]:
+        return self._lines_of("links")
 
     def _visible_lines(self) -> range:
         pane = self.query_one("#definition", VerticalScroll)
@@ -466,6 +529,107 @@ class PyDictApp(App[None]):
             self._link = place.link
             self._update_definition()
             self.refresh_bindings()
+
+    # -- finding in the definition --------------------------------------------
+
+    def _find_open(self) -> bool:
+        return self.query_one("#find-bar").display
+
+    def _find_query(self) -> str:
+        return self.query_one("#find", FindInput).value
+
+    def _match_style(self) -> Style:
+        if self.no_color:
+            return Style(reverse=True)
+        # Black on white on a dark background, white on black on a light one.
+        dark = is_dark(self.text_background)
+        return Style(color=(DARK if dark else LIGHT).hex, bgcolor=(LIGHT if dark else DARK).hex)
+
+    def _find(self, query: str) -> None:
+        """Highlight the matches of ``query`` (ignoring case) in the definition."""
+        self._matches = [
+            m.span() for m in re.finditer(re.escape(query), self.definition, re.IGNORECASE)
+        ] if query else []
+        self._match = None
+        self._lines.pop("matches", None)
+        self._update_definition()
+        self._update_find_count()
+        self.refresh_bindings()
+
+    def _update_find_count(self) -> None:
+        count = len(self._matches)
+        if not self._find_query():
+            label = ""
+        elif not count:
+            label = "No matches"
+        elif self._match is None:
+            label = f"{count} match{'' if count == 1 else 'es'}"
+        else:
+            label = f"{self._match + 1}/{count}"
+        self.query_one("#find-count", Static).update(label)
+
+    def action_open_find(self) -> None:
+        bar = self.query_one("#find-bar")
+        self._find_top = self._visible_lines().start
+        find = self.query_one("#find", FindInput)
+        if not bar.display:
+            bar.display = True
+            if find.value:
+                # Highlight the last search again once the pane has shrunk.
+                self.call_after_refresh(self._find_from_top)
+        find.focus()  # selects the text, so typing starts a new search
+
+    def action_close_find(self, clear: bool = False) -> None:
+        """Hide the find box, keeping the matches highlighted unless ``clear``."""
+        self.query_one("#find-bar").display = False
+        if clear:
+            self._find("")
+        self.query_one("#definition", VerticalScroll).focus()
+
+    @on(Input.Changed, "#find")
+    def _find_changed(self) -> None:
+        self._find_from_top()
+
+    @on(Input.Submitted, "#find")
+    def _find_submitted(self) -> None:
+        self.action_close_find(clear=not self._matches)
+
+    def _find_from_top(self) -> None:
+        """Find the query, going to the first match from where the find box was opened."""
+        self._find(self._find_query())
+        if self._matches:
+            lines = self._lines_of("matches")
+            self._go_to_match(next((n for n, y in enumerate(lines) if y >= self._find_top), 0))
+
+    def action_find_step(self, step: int) -> None:
+        """Go to the next (``step`` 1) or previous (-1) match, wrapping around.
+
+        If the current one is out of view, start from the visible ones.
+        """
+        if not self._matches:
+            return
+        count = len(self._matches)
+        lines = self._lines_of("matches")
+        visible = self._visible_lines()
+        if self._match is not None and lines[self._match] in visible:
+            index = (self._match + step) % count
+        elif step > 0:
+            index = next((n for n, y in enumerate(lines) if y >= visible.start), 0)
+        else:
+            index = next(
+                (n for n, y in reversed(list(enumerate(lines))) if y < visible.stop), count - 1
+            )
+        self._go_to_match(index)
+
+    def _go_to_match(self, index: int) -> None:
+        self._match = index
+        self._update_definition()
+        self._update_find_count()
+        y = self._lines_of("matches")[index]
+        visible = self._visible_lines()
+        if y not in visible:
+            pane = self.query_one("#definition", VerticalScroll)
+            pane.scroll_to(y=max(0, y - len(visible) // 2), animate=False, immediate=True)
 
     @on(mouse.MouseBack)
     def _mouse_back(self) -> None:

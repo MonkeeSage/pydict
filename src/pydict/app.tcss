@@ -13,11 +13,43 @@
     border: round $pydict-border;
 }
 
+#definition-column {
+    width: 1fr;
+    height: 1fr;
+}
+
 #definition {
     width: 1fr;
     height: 1fr;
     border: round $pydict-border;
     padding: 0 1;
+}
+
+#find-bar {
+    display: none;
+    height: 3;
+}
+
+#find {
+    width: 1fr;
+}
+
+#find-previous, #find-next {
+    width: 3;
+    height: 3;
+    content-align: center middle;
+}
+
+#find-previous:hover, #find-next:hover {
+    text-style: reverse;
+}
+
+#find-count {
+    width: auto;
+    height: 3;
+    padding: 0 1;
+    content-align: center middle;
+    color: $text-muted;
 }
 
 #words:focus, #definition:focus {

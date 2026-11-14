@@ -466,3 +466,129 @@ async def test_initial_focus(fruit_ifo: Path, word: str, focus: str | None, expe
     async with app.run_test() as pilot:
         await settle(pilot, app)
         assert app.focused.id == expected
+
+
+@pytest.fixture
+def findable_ifo(tmp_path: Path) -> Path:
+    lines = [f"line {n}" for n in range(100)]
+    lines[0], lines[50], lines[99] = "Pear at the top", "a pear in the middle", "PEAR at the bottom"
+    return write_dictionary(tmp_path, "findable", {"fruits": "\n".join(lines)})
+
+
+def match_lines(app: PyDictApp) -> list[int]:
+    return app._lines_of("matches")
+
+
+async def test_find_highlights_as_you_type(findable_ifo: Path) -> None:
+    app = make_app(findable_ifo, word="fruits")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        bar = app.query_one("#find-bar")
+        assert not bar.display
+        app.query_one("#definition").focus()
+        await pilot.press("slash")
+        assert bar.display and app.focused.id == "find"
+        await pilot.press("p")
+        assert len(app._matches) > 3  # "p" is everywhere
+        await pilot.press(*"ear")
+        plain = app.definition
+        assert [plain[s:e] for s, e in app._matches] == ["Pear", "pear", "PEAR"]  # ignores case
+        assert app._match == 0
+        assert str(app.query_one("#find-count").render()) == "1/3"
+        highlighted = app.query_one("#definition-text").content
+        start, end = app._matches[1]
+        assert any(
+            span.start <= start and span.end >= end and span.style.bgcolor is not None
+            for span in highlighted.spans
+        )
+
+        await pilot.press("enter")  # closes the box, keeps the matches
+        assert not bar.display and app.focused.id == "definition"
+        assert len(app._matches) == 3
+
+
+async def test_find_steps_wrap(findable_ifo: Path) -> None:
+    app = make_app(findable_ifo, word="fruits")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        pane = app.query_one("#definition", VerticalScroll)
+        pane.focus()
+        await pilot.press("slash", *"pear")
+        await pilot.press("down")
+        assert app._match == 1
+        assert match_lines(app)[1] in app._visible_lines() and pane.scroll_y > 0
+        await pilot.press("down", "down")  # wraps around the bottom
+        assert app._match == 0 and pane.scroll_y == 0
+        await pilot.press("up")  # and the top
+        assert app._match == 2
+        assert match_lines(app)[2] in app._visible_lines()
+
+        await pilot.click("#find-next")
+        assert app._match == 0 and app.focused.id == "find"
+        await pilot.click("#find-previous")
+        assert app._match == 2
+
+        await pilot.press("enter")
+        await pilot.press("n")  # works with the box closed
+        assert app._match == 0
+        await pilot.press("n")
+        assert app._match == 1
+        await pilot.press("N")
+        assert app._match == 0
+
+
+async def test_find_starts_from_view(findable_ifo: Path) -> None:
+    app = make_app(findable_ifo, word="fruits")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        pane = app.query_one("#definition", VerticalScroll)
+        pane.focus()
+        pane.scroll_to(y=30, animate=False, immediate=True)
+        await pilot.press("slash", *"pear")
+        assert app._match == 1  # the first one below the top of the view
+        await pilot.press("enter")
+        await pilot.press("home")
+        await pilot.wait_for_scheduled_animations()
+        await pilot.press("n")  # the current match is out of view
+        assert app._match == 0
+
+
+async def test_find_escape_clears(findable_ifo: Path) -> None:
+    app = make_app(findable_ifo, word="fruits")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        app.query_one("#definition").focus()
+        await pilot.press("slash", *"pear", "escape")
+        assert app.is_running  # escape doesn't quit from the find box
+        assert not app.query_one("#find-bar").display
+        assert app._matches == [] and app.focused.id == "definition"
+        assert app.check_action("find_step", (1,)) is False
+        await pilot.press("slash")  # the last search comes back
+        await pilot.pause()
+        assert len(app._matches) == 3
+        assert app.query_one("#find").selected_text == "pear"
+
+
+async def test_find_no_matches(findable_ifo: Path) -> None:
+    app = make_app(findable_ifo, word="fruits")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        app.query_one("#definition").focus()
+        await pilot.press("slash", *"plum")
+        assert str(app.query_one("#find-count").render()) == "No matches"
+        await pilot.press("down", "enter")
+        assert not app.query_one("#find-bar").display
+
+
+@pytest.mark.parametrize(("background", "color", "bgcolor"), [
+    ("#002b36", "#000000", "#ffffff"),
+    ("#fdf6e3", "#ffffff", "#000000"),
+])
+async def test_find_highlight_colors(findable_ifo: Path, background: str, color: str, bgcolor: str) -> None:
+    from textual.color import Color
+
+    app = make_app(findable_ifo, word="fruits", terminal_background=Color.parse(background))
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        style = app._match_style()
+        assert (style.color.name, style.bgcolor.name) == (color, bgcolor)
