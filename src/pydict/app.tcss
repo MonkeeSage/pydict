@@ -1,0 +1,71 @@
+#lookup {
+    margin: 0 0 0 0;
+}
+
+#results {
+    height: 1fr;
+}
+
+#words {
+    width: 25%;
+    min-width: 16;
+    height: 1fr;
+    border: round $pydict-border;
+}
+
+#definition {
+    width: 1fr;
+    height: 1fr;
+    border: round $pydict-border;
+    padding: 0 1;
+}
+
+#words:focus, #definition:focus {
+    border: round $accent;
+}
+
+/* OptionList's own CSS draws the unfocused cursor in $foreground, which can
+   be unreadable on the cursor's background. */
+#words > .option-list--option-highlighted {
+    color: $block-cursor-blurred-foreground;
+}
+
+#words:focus > .option-list--option-highlighted {
+    color: $block-cursor-foreground;
+}
+
+/* Transparent backgrounds in a terminal (ansi_color is on outside the browser). */
+#words:ansi, #definition:ansi {
+    background: ansi_default;
+    color: ansi_default;
+    scrollbar-background: ansi_default;
+    scrollbar-background-hover: ansi_default;
+    scrollbar-background-active: ansi_default;
+    scrollbar-corner-color: ansi_default;
+}
+
+Footer:ansi {
+    background: ansi_default;
+}
+
+Footer:ansi FooterKey, Footer:ansi FooterLabel {
+    background: ansi_default;
+}
+
+Footer:ansi FooterKey .footer-key--key, Footer:ansi FooterKey .footer-key--description {
+    background: ansi_default;
+}
+
+/* Without colors (--no-color, $NO_COLOR), mark the cursor and focus with
+   reverse video and heavier borders. */
+#words:nocolor > .option-list--option-highlighted {
+    text-style: reverse;
+}
+
+#words:nocolor:focus > .option-list--option-highlighted {
+    text-style: bold reverse;
+}
+
+#words:nocolor:focus, #definition:nocolor:focus {
+    border: heavy $accent;
+}
