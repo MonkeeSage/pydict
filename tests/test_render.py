@@ -135,3 +135,48 @@ def test_palette_without_italics() -> None:
     no_italics = replace(palette, italics=False)
     assert no_italics.resolve(Style(italic=True, color="green")) == Style(italic=False, color="green")
     assert not no_italics.resolve(Style(italic=True, dim=True)).italic
+
+
+def test_bword_links() -> None:
+    from pydict.render import LINK_TARGET, find_links
+
+    text = render_markup(
+        '<div>past of <a href="bword://run">run</a>, see <a href="bword://ice%20cream"> ice cream </a>'
+        ' or <a href="https://example.com">the web</a></div>',
+        "h",
+    )
+    assert text.plain == "past of run, see ice cream or the web"
+    links = find_links(text)
+    assert [(text.plain[link.start:link.end], link.target) for link in links] == [
+        ("run", "run"), ("ice cream", "ice cream"),
+    ]
+    # A click runs the app's follow_link action.
+    [style] = [s.style for s in text.spans if s.start == links[0].start and LINK_TARGET in s.style.meta]
+    assert style.meta["@click"] == ("app.follow_link", ("run",))
+    assert style.underline
+
+
+def test_xdxf_kref_links() -> None:
+    from pydict.render import find_links
+
+    text = render_markup("<k>ate</k> obs. f. <kref>oat</kref>, <i><kref>hate</kref></i>", "x")
+    assert [link.target for link in find_links(text)] == ["oat", "hate"]
+    unclosed = render_markup("see <kref>oat", "x")
+    assert [link.target for link in find_links(unclosed)] == ["oat"]
+
+
+def test_links_survive_entry_results_and_palette(fruit_ifo) -> None:
+    from dataclasses import replace
+
+    from pydict.render import find_links, render_results
+    from pydict.stardict import Dictionary, Library
+
+    lib = Library([Dictionary.from_ifo(fruit_ifo)])
+    lib.open()
+    results = lib.lookup("apple")
+    results[0].entries.append(Entry("x", [("h", b'see <a href="bword://banana">banana</a>')]))
+    palette = _palette("#1e1e1e", "#d0d0d0")
+    for p in (palette, replace(palette, color=False)):
+        text = render_results(results, p)
+        [link] = find_links(text)
+        assert text.plain[link.start:link.end] == "banana" and link.target == "banana"

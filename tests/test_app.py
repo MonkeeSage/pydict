@@ -90,6 +90,8 @@ async def test_tab_navigation(fruit_ifo: Path) -> None:
     app = make_app(fruit_ifo, word="ap")
     async with app.run_test() as pilot:
         await settle(pilot, app)
+        assert app.focused.id == "words"
+        await pilot.press("shift+tab")
         assert app.focused.id == "lookup"
         await pilot.press("tab")
         assert app.focused.id == "words"
@@ -123,8 +125,11 @@ async def test_page_keys_scroll_definition(tmp_path: Path) -> None:
 
 
 async def test_enter_moves_focus(fruit_ifo: Path) -> None:
-    app = make_app(fruit_ifo, word="ap")
+    app = make_app(fruit_ifo)
     async with app.run_test() as pilot:
+        await settle(pilot, app)
+        assert app.focused.id == "lookup"
+        await pilot.press(*"ap")
         await settle(pilot, app)
         await pilot.press("enter")
         assert app.focused.id == "words"
@@ -243,3 +248,194 @@ async def test_no_color(fruit_ifo: Path, monkeypatch: pytest.MonkeyPatch, no_col
         await pilot.press("tab")
         highlighted = words.get_component_rich_style("option-list--option-highlighted")
         assert bool(highlighted.reverse) is no_color
+
+
+@pytest.fixture
+def linked_ifo(tmp_path: Path) -> Path:
+    filler = "".join(f"<p>line {n}</p>" for n in range(80))
+    return write_dictionary(tmp_path, "linked", {
+        "ran": '<p>past of <a href="bword://run">run</a> and <a href="bword://rin">rin</a></p>',
+        "rin": "<p>to run</p>",
+        "run": "<p>to move swiftly</p>",
+        "long": f'<p><a href="bword://ran">top</a></p>{filler}<p><a href="bword://rin">bottom</a></p>',
+    }, sametypesequence="h")
+
+
+async def test_click_link_looks_up_word(linked_ifo: Path) -> None:
+    app = make_app(linked_ifo, word="ran")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        assert "past of run and rin" in app.definition
+        lines = app.definition.split("\n")
+        y = next(n for n, line in enumerate(lines) if line.startswith("past of"))
+        await pilot.click("#definition-text", offset=(lines[y].index("run"), y))
+        await settle(pilot, app)
+        assert app.query_one("#lookup").value == "run"
+        assert "to move swiftly" in app.definition
+        assert words(app)[app.query_one("#words", OptionList).highlighted] == "run"
+
+
+async def test_keyboard_link_cursor(linked_ifo: Path) -> None:
+    app = make_app(linked_ifo, word="ran")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        app.query_one("#definition").focus()
+        await pilot.press("enter")  # nothing selected yet
+        assert app.query_one("#lookup").value == "ran"
+        await pilot.press("right", "right", "right")  # stops at the last link
+        assert app._link == 1
+        await pilot.press("left")
+        assert app._link == 0
+        await pilot.press("enter")
+        await settle(pilot, app)
+        assert app.query_one("#lookup").value == "run"
+        assert app.focused.id == "definition"
+        assert app._link is None and app._links == []
+        assert "to move swiftly" in app.definition
+
+
+async def test_link_cursor_follows_scrolling(linked_ifo: Path) -> None:
+    app = make_app(linked_ifo, word="long")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        pane = app.query_one("#definition", VerticalScroll)
+        pane.focus()
+        await pilot.press("right")
+        assert app._link == 0 and pane.scroll_y == 0
+        await pilot.press("right")  # off screen: scrolls to it
+        await pilot.pause()
+        assert app._link == 1 and pane.scroll_y > 0
+        assert app._lines_of_links()[1] in app._visible_lines()
+        await pilot.press("home")
+        await pilot.wait_for_scheduled_animations()
+        assert pane.scroll_y == 0
+        assert app._link is None  # scrolled out of view
+        await pilot.press("right")  # starts again from the visible links
+        assert app._link == 0
+
+
+async def test_link_bindings_only_with_links(linked_ifo: Path) -> None:
+    app = make_app(linked_ifo, word="run")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        assert app.check_action("select_link", (1,)) is False
+        assert app.check_action("follow_selected_link", ()) is False
+        app.action_follow_link("ran")
+        await settle(pilot, app)
+        assert app.check_action("select_link", (1,)) is True
+
+
+async def test_backspace_goes_back_through_followed_links(linked_ifo: Path) -> None:
+    app = make_app(linked_ifo, word="ran")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        pane = app.query_one("#definition", VerticalScroll)
+        pane.focus()
+        await pilot.press("backspace")  # nothing to go back to
+        assert app.query_one("#lookup").value == "ran"
+        assert app.check_action("back", ()) is False
+        await pilot.press("right", "right", "enter")  # ran -> rin
+        await settle(pilot, app)
+        assert "to run" in app.definition
+        app.action_follow_link("run")  # rin -> run
+        await settle(pilot, app)
+        assert "to move swiftly" in app.definition
+        assert app.check_action("back", ()) is True
+
+        await pilot.press("backspace")
+        await settle(pilot, app)
+        assert app.query_one("#lookup").value == "rin"
+        assert "to run" in app.definition
+        app.query_one("#words").focus()  # works from the word list too
+        await pilot.press("backspace")
+        await settle(pilot, app)
+        assert app.query_one("#lookup").value == "ran"
+        assert "past of run and rin" in app.definition
+        assert app._link == 1  # the link that was followed is selected again
+        await pilot.press("backspace")  # back at the start
+        await settle(pilot, app)
+        assert app.query_one("#lookup").value == "ran"
+
+
+async def test_back_restores_highlighted_word_and_scroll(linked_ifo: Path) -> None:
+    app = make_app(linked_ifo, word="r")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        assert words(app) == ["ran", "rin", "run"]
+        app.query_one("#words").focus()
+        await pilot.press("down")  # highlight "rin" without typing it
+        app.action_follow_link("long")
+        await settle(pilot, app)
+        pane = app.query_one("#definition", VerticalScroll)
+        pane.focus()
+        await pilot.press("end")
+        await pilot.wait_for_scheduled_animations()
+        scrolled = pane.scroll_y
+        assert scrolled > 0
+        await pilot.press("right", "enter")  # long -> rin, from the bottom
+        await settle(pilot, app)
+        await pilot.press("backspace")
+        await settle(pilot, app)
+        assert "line 79" in app.definition and pane.scroll_y == scrolled
+        await pilot.press("backspace")
+        await settle(pilot, app)
+        assert app.query_one("#lookup").value == "r"
+        assert app.query_one("#words", OptionList).highlighted == 1
+        assert "to run" in app.definition
+
+
+async def test_typing_clears_history(linked_ifo: Path) -> None:
+    app = make_app(linked_ifo, word="ran")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        app.action_follow_link("run")
+        await settle(pilot, app)
+        app.query_one("#lookup").focus()
+        await pilot.press("end", "backspace")  # edits the lookup box, doesn't go back
+        await settle(pilot, app)
+        assert app.query_one("#lookup").value == "ru"
+        assert app._history == []
+
+
+async def test_mouse_back_button(linked_ifo: Path) -> None:
+    from pydict.mouse import MouseBack
+
+    app = make_app(linked_ifo, word="ran")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        app.action_follow_link("run")
+        await settle(pilot, app)
+        app.post_message(MouseBack())
+        await settle(pilot, app)
+        assert app.query_one("#lookup").value == "ran"
+
+
+def test_parser_reports_back_button() -> None:
+    from textual import events
+    from textual._xterm_parser import XTermParser
+
+    from pydict import mouse
+
+    mouse.install()
+    mouse.install()  # only patches once
+    parser = XTermParser()
+
+    def parse(data: str) -> list:
+        return list(parser.feed(data))
+
+    [back] = parse("\x1b[<128;5;5M")
+    assert isinstance(back, mouse.MouseBack)
+    assert isinstance(parse("\x1b[<144;5;5M")[0], mouse.MouseBack)  # with ctrl
+    for code in ("\x1b[<128;5;5m", "\x1b[<129;5;5M", "\x1b[<129;5;5m", "\x1b[<160;6;5M"):
+        assert parse(code) == [], code  # release, forward button, drag
+    [click] = parse("\x1b[<0;5;5M")
+    assert isinstance(click, events.MouseDown) and click.button == 1
+
+
+@pytest.mark.parametrize(("word", "focus"), [("ap", "words"), ("", "lookup"), ("zzzzzz", "lookup")])
+async def test_initial_focus(fruit_ifo: Path, word: str, focus: str) -> None:
+    # A word from the command line focuses the word list, like enter does.
+    app = make_app(fruit_ifo, word=word)
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        assert app.focused.id == focus

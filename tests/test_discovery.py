@@ -21,26 +21,44 @@ def env_for(home: Path, **extra: str) -> dict[str, str]:
 
 def test_search_dirs_default(home: Path) -> None:
     assert search_dirs(env=env_for(home)) == [
+        home / ".stardict/dic",
         home / ".local/share/stardict/dic",
         Path("/usr/share/stardict/dic"),
     ]
 
 
-def test_search_dirs_prefers_dot_stardict(home: Path, tmp_path: Path) -> None:
-    (home / ".stardict").mkdir()
-    env = env_for(home, XDG_DATA_HOME=str(tmp_path / "data"), STARDICT_DATA_DIR="/sd")
-    assert search_dirs(env=env) == [home / ".stardict/dic", Path("/sd")]
-
-
 def test_search_dirs_xdg_data_home(home: Path, tmp_path: Path) -> None:
-    env = env_for(home, XDG_DATA_HOME=str(tmp_path / "data"))
-    assert search_dirs(env=env)[0] == tmp_path / "data/stardict/dic"
+    # Unlike sdcv, an existing ~/.stardict doesn't hide $XDG_DATA_HOME.
+    (home / ".stardict/dic").mkdir(parents=True)
+    env = env_for(home, XDG_DATA_HOME=str(tmp_path / "data"), STARDICT_DATA_DIR="/sd")
+    assert search_dirs(env=env) == [
+        home / ".stardict/dic", tmp_path / "data/stardict/dic", Path("/sd"),
+    ]
 
 
 def test_search_dirs_data_dir_options(home: Path) -> None:
     env = env_for(home, STARDICT_DATA_DIR="/sd")
-    assert search_dirs("/mine", env=env) == [home / ".local/share/stardict/dic", Path("/mine")]
+    assert search_dirs("/mine", env=env) == [
+        home / ".stardict/dic", home / ".local/share/stardict/dic", Path("/mine"),
+    ]
     assert search_dirs("/mine", only_data_dir=True, env=env) == [Path("/mine")]
+
+
+def test_discover_both_user_dirs(home: Path, tmp_path: Path) -> None:
+    (home / ".stardict/dic").mkdir(parents=True)  # empty, as in the bug report
+    data = tmp_path / "data"
+    write_dictionary(data / "stardict/dic/w", "w", {"x": "1"}, bookname="Wiktionary")
+    found = discover(env=env_for(home, XDG_DATA_HOME=str(data), STARDICT_DATA_DIR=str(tmp_path / "none")))
+    assert [i.bookname for i in found.dictionaries] == ["Wiktionary"]
+
+
+def test_discover_skips_symlinked_duplicates(home: Path, tmp_path: Path) -> None:
+    write_dictionary(home / ".stardict/dic", "u", {"x": "1"}, bookname="User")
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "stardict").symlink_to(home / ".stardict")
+    found = discover(env=env_for(home, XDG_DATA_HOME=str(data), STARDICT_DATA_DIR=str(tmp_path / "none")))
+    assert [i.bookname for i in found.dictionaries] == ["User"]
 
 
 def make_dicts(root: Path) -> None:

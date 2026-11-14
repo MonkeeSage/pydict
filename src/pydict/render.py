@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
+from urllib.parse import unquote
 
 from rich.style import Style, StyleType
 from rich.text import Span, Text
@@ -14,6 +15,33 @@ from pydict.colors import DARK, LIGHT, is_dark, readable
 from pydict.stardict import Entry, Result
 
 LINK = Style(color="cyan", underline=True)
+
+# Style meta key holding the word a cross reference points to.
+LINK_TARGET = "pydict.link"
+
+
+def link_style(target: str) -> Style:
+    """The style of a cross reference to ``target``; clicking it looks it up."""
+    return LINK + Style(meta={"@click": ("app.follow_link", (target,)), LINK_TARGET: target})
+
+
+@dataclass(frozen=True)
+class Link:
+    """A cross reference in rendered text."""
+
+    start: int
+    end: int
+    target: str
+
+
+def find_links(text: Text) -> list[Link]:
+    """The cross references in ``text``, in order."""
+    links = [
+        Link(span.start, span.end, span.style.meta[LINK_TARGET])
+        for span in text.spans
+        if isinstance(span.style, Style) and LINK_TARGET in span.style.meta
+    ]
+    return sorted(links, key=lambda link: link.start)
 
 # Styles shared by HTML, XDXF and Pango markup.
 _COMMON_STYLES = {
@@ -76,7 +104,9 @@ class _MarkupRenderer(HTMLParser):
         self.kind = kind  # "h" (HTML), "x" (XDXF) or "g" (Pango)
         self.background = background
         self.text = Text()
-        self.stack: list[tuple[str, Style | None]] = []
+        # Open tags: (tag, style, link), where link is (start offset, target)
+        # for cross references; a target of None means the link's text.
+        self.stack: list[tuple[str, Style | None, tuple[int, str | None] | None]] = []
         self.quote_depth = 0
         self.skip = 0
         self.lists: list[int | None] = []  # item counter per <ol>, None for <ul>
@@ -93,7 +123,7 @@ class _MarkupRenderer(HTMLParser):
 
     def _style(self) -> Style:
         style = Style()
-        for _, s in self.stack:
+        for _, s, _ in self.stack:
             if s is not None:
                 style += s
         return style
@@ -166,16 +196,36 @@ class _MarkupRenderer(HTMLParser):
                     self._write(f"{counter + 1}. ")
         elif self.kind == "x" and tag == "def":
             self._newline()
-        self.stack.append((tag, style))
+        link: tuple[int, str | None] | None = None
+        href = a.get("href") or ""
+        if tag == "a" and href.startswith("bword://"):
+            link = (len(self.text), unquote(href[len("bword://"):]))
+        elif self.kind == "x" and tag == "kref":
+            link = (len(self.text), None)
+        self.stack.append((tag, style, link))
+
+    def _end_link(self, start: int, target: str | None) -> None:
+        plain = self.text.plain
+        end = len(plain)
+        # Leave out surrounding whitespace and line breaks.
+        while start < end and plain[start].isspace():
+            start += 1
+        while end > start and plain[end - 1].isspace():
+            end -= 1
+        target = (plain[start:end] if target is None else target).strip()
+        if target and end > start:
+            self.text.stylize(link_style(target), start, end)
 
     def handle_endtag(self, tag: str) -> None:
         if tag in _SKIP:
             self.skip = max(0, self.skip - 1)
             return
-        if not any(t == tag for t, _ in self.stack):
+        if not any(t == tag for t, _, _ in self.stack):
             return  # stray close tag
         while self.stack:
-            open_tag, _ = self.stack.pop()
+            open_tag, _, link = self.stack.pop()
+            if link is not None:
+                self._end_link(*link)
             if open_tag == tag:
                 break
         if self.kind == "x" and tag == "tr":
@@ -219,6 +269,9 @@ def render_markup(markup: str, kind: str, background: Color | None = None) -> Te
     renderer = _MarkupRenderer(kind, background)
     renderer.feed(markup)
     renderer.close()
+    for _, _, link in reversed(renderer.stack):  # unclosed links
+        if link is not None:
+            renderer._end_link(*link)
     text = renderer.text
     text.rstrip()
     return text
@@ -277,7 +330,8 @@ class Palette:
     def resolve(self, style: StyleType) -> Style:
         style = Style.parse(style) if isinstance(style, str) else style
         if not self.color:
-            style = style.without_color
+            meta = style.meta  # without_color drops it
+            style = style.without_color + Style(meta=meta) if meta else style.without_color
             return style + Style(italic=False) if style.italic and not self.italics else style
         if style.reverse:
             style += Style(

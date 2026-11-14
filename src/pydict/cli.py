@@ -14,9 +14,9 @@ from pydict.stardict.discovery import select_dicts
 from pydict.stardict.index import default_cache_dir
 
 EPILOG = """\
-Dictionaries are found the same way sdcv finds them: recursively in
-~/.stardict/dic (or $XDG_DATA_HOME/stardict/dic when ~/.stardict doesn't
-exist), then in --data-dir, $STARDICT_DATA_DIR or /usr/share/stardict/dic.
+Dictionaries are found much like sdcv finds them: recursively in
+~/.stardict/dic and $XDG_DATA_HOME/stardict/dic, then in --data-dir,
+$STARDICT_DATA_DIR or /usr/share/stardict/dic.
 Booknames listed in $XDG_CONFIG_HOME/sdcv_ordering or ~/.sdcv_ordering are
 used first. With --dict, no search is done and only the given dictionaries
 are used.

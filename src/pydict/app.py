@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
+from dataclasses import dataclass
 from pathlib import Path
 
+from rich._wrap import divide_line
+from rich.style import Style
 from rich.text import Text
 from textual import on, work
 from textual.color import Color
@@ -14,9 +18,9 @@ from textual.filter import Monochrome, NoColor
 from textual.timer import Timer
 from textual.widgets import Footer, Input, OptionList, Static
 
-from pydict import clipboard, colors
+from pydict import clipboard, colors, mouse
 from pydict.colors import readable
-from pydict.render import Palette, render_results
+from pydict.render import Link, Palette, find_links, render_results
 from pydict.stardict import DictInfo, Dictionary, DictionaryError, Library
 
 SEARCH_DELAY = 0.12
@@ -28,6 +32,22 @@ PAGE_BINDINGS = [
     Binding("pagedown", "app.scroll_definition('page_down')", show=False),
     Binding("pageup", "app.scroll_definition('page_up')", show=False),
 ]
+
+
+# Back from a followed cross reference, in the panes where backspace isn't
+# needed for typing.
+BACK_BINDING = Binding("backspace", "app.back", "Back")
+
+
+@dataclass(frozen=True)
+class Place:
+    """What was shown before a cross reference was followed."""
+
+    query: str  # the lookup box
+    word: str | None  # the highlighted word
+    highlighted: int | None  # its index in the word list
+    scroll_y: float  # of the definition
+    link: int | None  # the selected cross reference
 
 
 class LookupInput(Input):
@@ -49,7 +69,19 @@ class WordList(OptionList):
 
     BINDINGS = [
         Binding("enter", "app.focus('definition')", "Definition", show=False),
+        BACK_BINDING,
         *PAGE_BINDINGS,
+    ]
+
+
+class DefinitionPane(VerticalScroll):
+    """The definition. Left/right select a cross reference, enter looks it up."""
+
+    BINDINGS = [
+        Binding("right", "app.select_link(1)", "Links", key_display="←→"),
+        Binding("left", "app.select_link(-1)", "Previous link", show=False),
+        Binding("enter", "app.follow_selected_link", "Look up"),
+        BACK_BINDING,
     ]
 
 
@@ -75,6 +107,7 @@ class PyDictApp(App[None]):
         terminal_foreground: Color | None = None,
         no_color: bool = False,
     ) -> None:
+        mouse.install()  # before the driver starts parsing input
         super().__init__()
         # Textual applies $NO_COLOR itself, but also when it's empty, and with
         # a filter that keeps grey backgrounds. Remove all color instead, and
@@ -96,6 +129,11 @@ class PyDictApp(App[None]):
         self.italics = True
         self.library: Library | None = None
         self.definition = ""  # plain text of the displayed definition
+        self._text = Text()  # the displayed definition, without the link cursor
+        self._links: list[Link] = []  # cross references in it
+        self._link: int | None = None  # index of the selected one
+        self._link_lines: tuple[int, list[int]] | None = None  # (width, line of each link)
+        self._history: list[Place] = []  # places left by following cross references
         self._shown_word: str | None = None
         self._search_timer: Timer | None = None
         self._osc52: bool | None = None
@@ -107,7 +145,7 @@ class PyDictApp(App[None]):
         yield LookupInput(placeholder="Look up a word…", id="lookup")
         with Horizontal(id="results"):
             yield WordList(id="words")
-            with VerticalScroll(id="definition"):
+            with DefinitionPane(id="definition"):
                 yield Static(id="definition-text")
         yield Footer()
 
@@ -128,6 +166,9 @@ class PyDictApp(App[None]):
         words.border_title = "Words"
         pane = self.query_one("#definition", VerticalScroll)
         pane.border_title = "Definition"
+        self.watch(pane, "scroll_y", self._definition_scrolled, init=False)
+        # Links are styled by render.py, not by Textual.
+        self.query_one("#definition-text", Static).auto_links = False
         lookup = self.query_one("#lookup", LookupInput)
         lookup.value = self.initial_word
         lookup.focus()
@@ -167,11 +208,19 @@ class PyDictApp(App[None]):
         pane = self.query_one("#definition", VerticalScroll)
         pane.border_subtitle = f"{count} dictionar{'y' if count == 1 else 'ies'}"
         self.search()
+        # A word from the command line is looked up as if enter was pressed.
+        words = self.query_one("#words", OptionList)
+        if self.initial_word.strip() and words.option_count:
+            words.focus()
 
     # -- searching ----------------------------------------------------------
 
     @on(Input.Changed, "#lookup")
     def _lookup_changed(self) -> None:
+        # Typing starts over; looking up a cross reference doesn't send this.
+        if self._history:
+            self._history.clear()
+            self.refresh_bindings()
         if self._search_timer is not None:
             self._search_timer.stop()
         self._search_timer = self.set_timer(SEARCH_DELAY, self.search)
@@ -247,12 +296,160 @@ class PyDictApp(App[None]):
 
     def _show(self, text: Text) -> None:
         self.definition = text.plain
+        self._text = text
+        self._links = find_links(text)
+        self._link = None
+        self._link_lines = None
+        self._update_definition()
+        self.query_one("#definition", VerticalScroll).scroll_home(animate=False, immediate=True)
+        self.refresh_bindings()
+
+    def _update_definition(self) -> None:
+        text = self._text
+        if self._link is not None:
+            link = self._links[self._link]
+            text = text.copy()
+            text.stylize(self.palette().resolve(Style(bold=True, reverse=True)), link.start, link.end)
         self.query_one("#definition-text", Static).update(text)
-        self.query_one("#definition", VerticalScroll).scroll_home(animate=False)
 
     def action_scroll_definition(self, action: str) -> None:
         pane = self.query_one("#definition", VerticalScroll)
         getattr(pane, f"action_{action}")()
+
+    # -- cross references ---------------------------------------------------
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if action == "select_link":
+            return bool(self._links)
+        if action == "follow_selected_link":
+            return self._link is not None
+        if action == "back":
+            return bool(self._history)
+        return True
+
+    def _lines_of_links(self) -> list[int]:
+        """The line each link starts on, as wrapped in the definition pane."""
+        width = self.query_one("#definition-text", Static).content_size.width
+        if self._link_lines is not None and self._link_lines[0] == width:
+            return self._link_lines[1]
+        # Wrap the way Textual wraps the Static's content.
+        lines: list[int] = []
+        y = start = 0
+        links = iter(self._links)
+        link = next(links, None)
+        for line in self.definition.split("\n"):
+            end = start + len(line)
+            breaks = divide_line(line, max(width, 1), fold=True)
+            while link is not None and link.start <= end:
+                lines.append(y + bisect_right(breaks, link.start - start))
+                link = next(links, None)
+            y += len(breaks) + 1
+            start = end + 1
+        self._link_lines = (width, lines)
+        return lines
+
+    def _visible_lines(self) -> range:
+        pane = self.query_one("#definition", VerticalScroll)
+        top = round(pane.scroll_y)
+        return range(top, top + pane.scrollable_content_region.height)
+
+    def action_select_link(self, step: int) -> None:
+        """Select the next (``step`` 1) or previous (-1) cross reference.
+
+        If the selected one is out of view, start from the visible ones.
+        """
+        if not self._links:
+            return
+        lines = self._lines_of_links()
+        visible = self._visible_lines()
+        if self._link is not None and lines[self._link] in visible:
+            index = self._link + step
+            if not 0 <= index < len(self._links):
+                return
+        elif step > 0:
+            index = next((n for n, y in enumerate(lines) if y >= visible.start), None)
+        else:
+            index = next((n for n, y in reversed(list(enumerate(lines))) if y < visible.stop), None)
+        if index is None:
+            return
+        self._link = index
+        self._update_definition()
+        self.refresh_bindings()
+        y = lines[index]
+        if y not in visible:
+            pane = self.query_one("#definition", VerticalScroll)
+            top = y if y < visible.start else y - len(visible) + 1
+            pane.scroll_to(y=top, animate=False, immediate=True)
+
+    def _definition_scrolled(self) -> None:
+        # Forget a selected link once it's scrolled out of view, so enter
+        # doesn't follow a link that can't be seen.
+        if self._link is not None and self._lines_of_links()[self._link] not in self._visible_lines():
+            self._link = None
+            self._update_definition()
+            self.refresh_bindings()
+
+    def action_follow_selected_link(self) -> None:
+        if self._link is not None:
+            self.action_follow_link(self._links[self._link].target)
+
+    def action_follow_link(self, word: str) -> None:
+        """Look up ``word`` (a cross reference was clicked or followed)."""
+        if self.library is None or word == self._shown_word:
+            return
+        words = self.query_one("#words", OptionList)
+        highlighted = words.highlighted
+        self._history.append(Place(
+            query=self.query_one("#lookup", LookupInput).value,
+            word=None if highlighted is None else str(words.get_option_at_index(highlighted).prompt),
+            highlighted=highlighted,
+            scroll_y=self.query_one("#definition", VerticalScroll).scroll_y,
+            link=self._link,
+        ))
+        self._look_up(word)
+        self.refresh_bindings()
+
+    def _look_up(self, query: str) -> None:
+        """Search for ``query`` as if it had been typed."""
+        lookup = self.query_one("#lookup", LookupInput)
+        if self._search_timer is not None:
+            self._search_timer.stop()
+            self._search_timer = None
+        with lookup.prevent(Input.Changed):
+            lookup.value = query
+        lookup.cursor_position = len(query)
+        self.search()
+
+    def action_back(self) -> None:
+        """Go back to where the last cross reference was followed from."""
+        if not self._history:
+            return
+        place = self._history.pop()
+        self.refresh_bindings()
+        self._look_up(place.query)
+        words = self.query_one("#words", OptionList)
+        index = place.highlighted
+        if (
+            place.word is not None and index is not None and index < words.option_count
+            and str(words.get_option_at_index(index).prompt) == place.word
+        ):
+            words.highlighted = index
+            self.show_definition(place.word)
+        # Restore the scroll position once the definition has been laid out.
+        self.call_after_refresh(self._restore_place, place)
+
+    def _restore_place(self, place: Place) -> None:
+        pane = self.query_one("#definition", VerticalScroll)
+        pane.scroll_to(y=place.scroll_y, animate=False, immediate=True)
+        if place.link is not None and place.link < len(self._links):
+            self._link = place.link
+            self._update_definition()
+            self.refresh_bindings()
+
+    @on(mouse.MouseBack)
+    def _mouse_back(self) -> None:
+        if self.screen is self.screen_stack[0]:  # not in the command palette
+            self.action_back()
 
     # -- clipboard ----------------------------------------------------------
 

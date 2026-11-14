@@ -30,16 +30,24 @@ definition of the highlighted word is shown on the right.
 | up / down (in the lookup box) | move through the word list |
 | page up / page down | scroll the definition |
 | enter | lookup box → word list → definition |
+| left / right (in the definition) | select the previous / next cross reference |
+| enter (on a cross reference) | look up the word it points to |
+| backspace (in the word list or definition) | go back to where the last cross reference was followed from |
 | ctrl+c | copy the displayed definition as plain text |
 | ctrl+q / escape | quit |
 
-Panes can also be focused with the mouse.
+Panes can also be focused with the mouse, and clicking a cross reference
+looks it up. Cross references are `bword://` links in HTML dictionaries and
+`<kref>` tags in XDXF ones. The mouse's back button goes back like backspace
+does, in terminals that report it (pydict reads xterm's button 8). Typing a new
+word in the lookup box starts over.
 
 ### Finding dictionaries
 
 Like `sdcv`, pydict searches recursively in:
 
-1. `~/.stardict/dic`, or `$XDG_DATA_HOME/stardict/dic` if `~/.stardict` doesn't exist;
+1. `~/.stardict/dic` and `$XDG_DATA_HOME/stardict/dic` (sdcv only uses the
+   second when `~/.stardict` doesn't exist; pydict always searches both);
 2. `--data-dir`, else `$STARDICT_DATA_DIR`, else `/usr/share/stardict/dic`.
 
 `-x/--only-data-dir` skips the user directory, and `-u/--use-dict NAME`

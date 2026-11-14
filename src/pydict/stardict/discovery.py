@@ -2,8 +2,8 @@
 
 Directories, in order:
 
-1. the user directory: ``~/.stardict/dic``, or ``$XDG_DATA_HOME/stardict/dic``
-   when ``~/.stardict`` does not exist (skipped with ``only_data_dir``);
+1. the user directories: ``~/.stardict/dic`` and
+   ``$XDG_DATA_HOME/stardict/dic`` (skipped with ``only_data_dir``);
 2. the data directory: ``data_dir`` if given, otherwise ``$STARDICT_DATA_DIR``
    or ``/usr/share/stardict/dic`` (none with ``only_data_dir`` and no
    ``data_dir``).
@@ -13,9 +13,11 @@ in the ordering file (``$XDG_CONFIG_HOME/sdcv_ordering`` or
 ``~/.sdcv_ordering``, one bookname per line) come first; with ``use_dicts``
 only the matching dictionaries are used, in the given order.
 
-Unlike sdcv, directory entries are visited in sorted order rather than
-filesystem order, so results are reproducible, and ``use_dicts`` matches any
-part of the bookname, ignoring case.
+Unlike sdcv, both user directories are searched (sdcv skips the XDG one
+whenever ``~/.stardict`` exists, even if it is empty), directory entries are
+visited in sorted order rather than filesystem order, so results are
+reproducible, and ``use_dicts`` matches any part of the bookname, ignoring
+case.
 """
 
 from __future__ import annotations
@@ -37,11 +39,11 @@ def _xdg(env: Mapping[str, str], var: str, default: str) -> Path:
     return Path(value) if value and os.path.isabs(value) else _home(env) / default
 
 
-def user_dir(env: Mapping[str, str] = os.environ) -> Path:
-    conf = _home(env) / ".stardict"
-    if not conf.is_dir():
-        conf = _xdg(env, "XDG_DATA_HOME", ".local/share") / "stardict"
-    return conf / "dic"
+def user_dirs(env: Mapping[str, str] = os.environ) -> list[Path]:
+    return [
+        _home(env) / ".stardict" / "dic",
+        _xdg(env, "XDG_DATA_HOME", ".local/share") / "stardict" / "dic",
+    ]
 
 
 def search_dirs(
@@ -51,7 +53,7 @@ def search_dirs(
 ) -> list[Path]:
     dirs: list[Path] = []
     if not only_data_dir:
-        dirs.append(user_dir(env))
+        dirs += user_dirs(env)
     if data_dir is not None:
         dirs.append(Path(data_dir).expanduser())
     elif not only_data_dir:
@@ -125,8 +127,13 @@ def discover(
 ) -> Discovery:
     result = Discovery()
     infos: list[DictInfo] = []
+    seen: set[Path] = set()  # the directories may overlap through symlinks
     for directory in search_dirs(data_dir, only_data_dir, env):
         for path in find_ifo_files(directory):
+            real = path.resolve()
+            if real in seen:
+                continue
+            seen.add(real)
             try:
                 infos.append(parse_ifo(path))
             except DictionaryError as e:
