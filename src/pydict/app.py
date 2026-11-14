@@ -659,8 +659,20 @@ class PyDictApp(App[None]):
 
     # -- clipboard ----------------------------------------------------------
 
+    def _selected_definition_text(self) -> str:
+        """Text selected with the mouse in the definition, if it has focus."""
+        pane = self.query_one("#definition", VerticalScroll)
+        if not pane.has_focus:
+            return ""
+        static = self.query_one("#definition-text", Static)
+        selection = self.screen.selections.get(static)
+        extracted = static.get_selection(selection) if selection else None
+        return extracted[0] if extracted else ""
+
     def action_copy_definition(self) -> None:
-        text = self.definition
+        text = self._selected_definition_text()
+        what = "selection" if text else "definition"
+        text = text or self.definition
         if not text:
             self.notify("No definition to copy.", severity="warning")
             return
@@ -672,22 +684,22 @@ class PyDictApp(App[None]):
                 self._osc52 = clipboard.terminal_supports_osc52()
             mode = "osc52" if self._osc52 else "system"
         if mode == "osc52":
-            self._copy_osc52(text)
+            self._copy_osc52(text, what)
         else:
-            self._copy_system(text, fallback=self.clipboard_mode == "auto")
+            self._copy_system(text, what, fallback=self.clipboard_mode == "auto")
 
-    def _copy_osc52(self, text: str, note: str = "") -> None:
+    def _copy_osc52(self, text: str, what: str, note: str = "") -> None:
         self.copy_to_clipboard(text)
-        self.notify(f"Copied definition to the clipboard (OSC 52){note}.")
+        self.notify(f"Copied {what} to the clipboard (OSC 52){note}.")
 
     @work(thread=True, exclusive=True, group="clipboard", exit_on_error=False)
-    def _copy_system(self, text: str, fallback: bool) -> None:
+    def _copy_system(self, text: str, what: str, fallback: bool) -> None:
         try:
             tool = clipboard.system_copy(text)
         except clipboard.ClipboardError as e:
             if fallback:
-                self.call_from_thread(self._copy_osc52, text, f"; {e}")
+                self.call_from_thread(self._copy_osc52, text, what, f"; {e}")
             else:
                 self.call_from_thread(self.notify, f"Copy failed: {e}.", severity="error")
             return
-        self.call_from_thread(self.notify, f"Copied definition to the clipboard ({tool}).")
+        self.call_from_thread(self.notify, f"Copied {what} to the clipboard ({tool}).")

@@ -271,6 +271,24 @@ async def test_copy_when_input_has_selection(fruit_ifo: Path) -> None:
         assert app.clipboard == app.definition
 
 
+async def test_copy_selected_definition_text(fruit_ifo: Path) -> None:
+    app = make_app(fruit_ifo, word="banana", clipboard_mode="osc52")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        static = app.query_one("#definition-text")
+        line = app.definition.split("\n").index("A long yellow fruit.")
+        await pilot.mouse_down(static, offset=(2, line))
+        await pilot.hover(static, offset=(8, line))
+        await pilot.mouse_up(static, offset=(8, line))
+        assert app.query_one("#definition").has_focus
+        await pilot.press("ctrl+c")
+        assert app.clipboard == "long ye"
+        # Without focus, the whole definition is copied.
+        app.query_one("#words").focus()
+        await pilot.press("ctrl+c")
+        assert app.clipboard == app.definition
+
+
 async def test_copy_nothing(fruit_ifo: Path) -> None:
     app = make_app(fruit_ifo, clipboard_mode="osc52")
     async with app.run_test() as pilot:

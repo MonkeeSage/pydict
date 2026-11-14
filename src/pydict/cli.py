@@ -26,8 +26,8 @@ Booknames listed in $XDG_CONFIG_HOME/sdcv_ordering or ~/.sdcv_ordering are
 used first. With --dict, no search is done and only the given dictionaries
 are used.
 
-Keys: tab/shift+tab move between panes, ctrl+c copies the definition,
-ctrl+q or escape quits.
+Keys: tab/shift+tab move between panes, ctrl+c copies the definition (or
+the text selected in it), ctrl+q or escape quits.
 """
 
 

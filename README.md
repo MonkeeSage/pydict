@@ -38,7 +38,7 @@ definition of the highlighted word is shown on the right.
 | enter / escape (in the find box) | close it, keeping / clearing the highlights |
 | n / N (in the definition) | go to the next / previous match |
 | backspace (in the word list or definition) | go back to where the last cross reference was followed from |
-| ctrl+c | copy the displayed definition as plain text |
+| ctrl+c | copy the displayed definition as plain text (only the text selected with the mouse, when the definition has focus) |
 | ctrl+q / escape | quit |
 
 Panes can also be focused with the mouse, and clicking a cross reference
