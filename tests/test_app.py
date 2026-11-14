@@ -69,6 +69,31 @@ async def test_theme_follows_terminal_background(fruit_ifo: Path, background: st
         assert app.text_background == bg
 
 
+@pytest.mark.parametrize("focus_color", [None, "#d33682"])
+async def test_focus_color(fruit_ifo: Path, focus_color: str | None) -> None:
+    from textual.color import Color
+
+    app = make_app(
+        fruit_ifo, word="ap", focus_color=Color.parse(focus_color) if focus_color else None
+    )
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        variables = app.get_css_variables()
+        app.query_one("#find-bar").display = True
+        for selector, default in [
+            ("#words", "accent"), ("#definition", "accent"), ("#lookup", "border"), ("#find", "border"),
+        ]:
+            expected = Color.parse(focus_color or variables[default])
+            widget = app.query_one(selector)
+            if widget.has_focus:
+                app.query_one("#definition").focus()
+                await pilot.pause()
+            assert widget.styles.border_top[1] != expected, selector
+            widget.focus()
+            await pilot.pause()
+            assert widget.styles.border_top[1] == expected, selector
+
+
 async def test_initial_word_and_fuzzy(fruit_ifo: Path) -> None:
     app = make_app(fruit_ifo, word="bananna")
     async with app.run_test() as pilot:

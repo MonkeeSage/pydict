@@ -8,6 +8,8 @@ import shlex
 import sys
 from pathlib import Path
 
+from textual.color import Color
+
 from pydict import __version__, clipboard, colors
 from pydict.stardict import DictInfo, DictionaryError, discover, parse_ifo, resolve_dict_path
 from pydict.stardict.discovery import select_dicts
@@ -32,6 +34,13 @@ ctrl+q or escape quits.
 def background_arg(value: str):
     try:
         return colors.parse_background(value)
+    except Exception:
+        raise argparse.ArgumentTypeError(f"not a color: {value!r}") from None
+
+
+def color_arg(value: str):
+    try:
+        return Color.parse(value.strip())
     except Exception:
         raise argparse.ArgumentTypeError(f"not a color: {value!r}") from None
 
@@ -74,6 +83,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--background", metavar="COLOR", type=background_arg,
         help="the terminal's background color, used to keep text readable: dark, light "
         "or a color such as '#fdf6e3' (default: ask the terminal, then $COLORFGBG)",
+    )
+    parser.add_argument(
+        "--focus-color", metavar="COLOR", type=color_arg,
+        help="the border color of the focused pane or text box, such as 'orange' "
+        "or '#d33682' (default: the theme's colors)",
     )
     parser.add_argument(
         "--no-color", action="store_true",
@@ -135,6 +149,8 @@ def serve_command(args: argparse.Namespace) -> str:
         argv.append("--no-color")
     if args.focus:
         argv += ["--focus", args.focus]
+    if args.focus_color:
+        argv += ["--focus-color", args.focus_color.hex]
     if args.word:
         argv += ["--", args.word]
     return shlex.join(argv)
@@ -199,6 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         terminal_background=background,
         terminal_foreground=foreground,
         no_color=no_color,
+        focus_color=args.focus_color,
     )
     app.run()
     return app.return_code or 0

@@ -156,6 +156,7 @@ class PyDictApp(App[None]):
         terminal_background: Color | None = None,
         terminal_foreground: Color | None = None,
         no_color: bool = False,
+        focus_color: Color | None = None,
     ) -> None:
         mouse.install()  # before the driver starts parsing input
         super().__init__()
@@ -174,6 +175,7 @@ class PyDictApp(App[None]):
         self.warnings = warnings or []
         self.terminal_background = terminal_background
         self.terminal_foreground = terminal_foreground
+        self.focus_color = focus_color  # border of the focused pane (--focus-color)
         # The background definitions are drawn on; markup colors are made
         # readable against it.
         self.text_background = colors.DARK
@@ -195,6 +197,19 @@ class PyDictApp(App[None]):
 
     def get_theme_variable_defaults(self) -> dict[str, str]:
         return {colors.BORDER_VARIABLE: "#45505a"}
+
+    def get_css_variables(self) -> dict[str, str]:
+        variables = super().get_css_variables()
+        # Called by App.__init__, before focus_color is set.
+        focus_color = getattr(self, "focus_color", None)
+        variables[colors.FOCUS_BORDER_VARIABLE] = (
+            focus_color.hex if focus_color else variables["accent"]
+        )
+        # Textual's inputs use $border when focused.
+        variables[colors.INPUT_FOCUS_BORDER_VARIABLE] = (
+            focus_color.hex if focus_color else variables["border"]
+        )
+        return variables
 
     def compose(self) -> ComposeResult:
         yield LookupInput(placeholder="Look up a word…", id="lookup")

@@ -53,7 +53,17 @@
 }
 
 #words:focus, #definition:focus {
-    border: round $accent;
+    border: round $pydict-focus-border;
+}
+
+/* Textual's tall border draws its lines at the outer edges of the cells,
+   which makes the boxes look five rows high; round lines sit mid-cell. */
+#lookup, #find {
+    border: round $border-blurred;
+}
+
+#lookup:focus, #find:focus {
+    border: round $pydict-input-focus-border;
 }
 
 /* OptionList's own CSS draws the unfocused cursor in $foreground, which can
@@ -99,5 +109,5 @@ Footer:ansi FooterKey .footer-key--key, Footer:ansi FooterKey .footer-key--descr
 }
 
 #words:nocolor:focus, #definition:nocolor:focus {
-    border: heavy $accent;
+    border: heavy $pydict-focus-border;
 }

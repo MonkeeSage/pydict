@@ -68,15 +68,27 @@ def test_background_option() -> None:
         parser.parse_args(["--background", "nope"])
 
 
+def test_focus_color_option() -> None:
+    from textual.color import Color
+
+    parser = cli.build_parser()
+    assert parser.parse_args([]).focus_color is None
+    assert parser.parse_args(["--focus-color", "#d33682"]).focus_color == Color(211, 54, 130)
+    assert parser.parse_args(["--focus-color", "red"]).focus_color == Color(255, 0, 0)
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--focus-color", "nope"])
+
+
 def test_serve_command(fruit_ifo: Path) -> None:
     args = cli.build_parser().parse_args(
         ["--serve", "-d", str(fruit_ifo), "-u", "Fruit Book", "--no-cache", "--no-color",
-         "--focus", "definition", "--", "-word"]
+         "--focus", "definition", "--focus-color", "red", "--", "-word"]
     )
     argv = shlex.split(cli.serve_command(args))
     assert argv[:3] == [sys.executable, "-m", "pydict"]
     assert argv[3:] == ["--dict", str(fruit_ifo.resolve()), "--use-dict", "Fruit Book",
-                        "--no-cache", "--no-color", "--focus", "definition", "--", "-word"]
+                        "--no-cache", "--no-color", "--focus", "definition",
+                        "--focus-color", "#FF0000", "--", "-word"]
     assert cli.build_parser().parse_args(argv[3:]).word == "-word"
 
 

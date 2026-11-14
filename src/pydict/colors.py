@@ -171,6 +171,8 @@ def detect_terminal_colors(
 
 THEME_NAME = "pydict-terminal"
 BORDER_VARIABLE = "pydict-border"
+FOCUS_BORDER_VARIABLE = "pydict-focus-border"
+INPUT_FOCUS_BORDER_VARIABLE = "pydict-input-focus-border"
 
 
 def border_color(background: Color, foreground: Color) -> Color:
