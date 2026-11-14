@@ -43,7 +43,9 @@ definition of the highlighted word is shown on the right.
 
 Panes can also be focused with the mouse, and clicking a cross reference
 looks it up. Cross references are `bword://` links in HTML dictionaries and
-`<kref>` tags in XDXF ones. The mouse's back button goes back like backspace
+`<kref>` tags in XDXF ones. Double-clicking any word in the definition looks it
+up too (instead of selecting all the text), and backspace goes back from it
+the same way. The mouse's back button goes back like backspace
 does, in terminals that report it (pydict reads xterm's button 8). Typing a new
 word in the lookup box starts over.
 

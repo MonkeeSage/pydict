@@ -342,6 +342,38 @@ async def test_click_link_looks_up_word(linked_ifo: Path) -> None:
         assert words(app)[app.query_one("#words", OptionList).highlighted] == "run"
 
 
+async def test_double_click_looks_up_word(linked_ifo: Path) -> None:
+    app = make_app(linked_ifo, word="rin")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        lines = app.definition.split("\n")
+        y = lines.index("to run")
+        await pilot.double_click("#definition-text", offset=(2, y))  # the space
+        await settle(pilot, app)
+        assert app.query_one("#lookup").value == "rin"
+        await pilot.double_click("#definition-text", offset=(lines[y].index("run") + 1, y))
+        await settle(pilot, app)
+        assert app.query_one("#lookup").value == "run"
+        assert "to move swiftly" in app.definition
+        assert not app.screen.selections  # rather than selecting all the text
+        await pilot.press("backspace")  # back like from a cross reference
+        await settle(pilot, app)
+        assert app.query_one("#lookup").value == "rin"
+        assert app.check_action("back", ()) is False
+
+
+async def test_double_click_link_follows_it_once(linked_ifo: Path) -> None:
+    app = make_app(linked_ifo, word="ran")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        lines = app.definition.split("\n")
+        y = next(n for n, line in enumerate(lines) if line.startswith("past of"))
+        await pilot.double_click("#definition-text", offset=(lines[y].index("run"), y))
+        await settle(pilot, app)
+        assert app.query_one("#lookup").value == "run"
+        assert len(app._history) == 1
+
+
 async def test_keyboard_link_cursor(linked_ifo: Path) -> None:
     app = make_app(linked_ifo, word="ran")
     async with app.run_test() as pilot:

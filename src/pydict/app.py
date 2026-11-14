@@ -39,10 +39,16 @@ PAGE_BINDINGS = [
 # needed for typing.
 BACK_BINDING = Binding("backspace", "app.back", "Back")
 
+# A word in a definition, for double clicks: letters and digits, joined by
+# apostrophes or hyphens ("don't", "well-known").
+WORD = re.compile(r"\w+(?:['’-]\w+)*")
+
 
 @dataclass(frozen=True)
 class Place:
-    """What was shown before a cross reference was followed."""
+    """What was shown before a cross reference was followed (or a word
+    double-clicked).
+    """
 
     query: str  # the lookup box
     word: str | None  # the highlighted word
@@ -107,6 +113,28 @@ class DefinitionPane(VerticalScroll):
         Binding("N", "app.find_step(-1)", "Previous match", show=False),
         BACK_BINDING,
     ]
+
+
+class DefinitionText(Static):
+    """The definition's text. A double click looks up the word under the
+    pointer, instead of selecting all the text (ctrl+c copies it all).
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._clicked_definition: str | None = None
+
+    def _on_click(self, event: events.Click) -> None:
+        if event.chain == 1:
+            self._clicked_definition = self.app.definition
+            return
+        # Skip Widget._on_click, which selects text (and follows links again).
+        event.prevent_default()
+        # Not if the first click followed a cross reference.
+        if event.chain == 2 and self.app.definition == self._clicked_definition:
+            _, offset = self.screen.get_widget_and_offset_at(event.screen_x, event.screen_y)
+            if offset is not None:
+                self.app.look_up_word_at(offset.y, offset.x)
 
 
 class FindInput(Input):
@@ -223,7 +251,7 @@ class PyDictApp(App[None]):
             yield WordList(id="words")
             with Vertical(id="definition-column"):
                 with DefinitionPane(id="definition"):
-                    yield Static(id="definition-text")
+                    yield DefinitionText(id="definition-text")
                 with Horizontal(id="find-bar"):
                     yield FindInput(placeholder="Find…", id="find")
                     yield FindArrow("▲", -1, id="find-previous")
@@ -499,7 +527,9 @@ class PyDictApp(App[None]):
             self.action_follow_link(self._links[self._link].target)
 
     def action_follow_link(self, word: str) -> None:
-        """Look up ``word`` (a cross reference was clicked or followed)."""
+        """Look up ``word`` (a cross reference was clicked or followed, or a
+        word double-clicked).
+        """
         if self.library is None or word == self._shown_word:
             return
         words = self.query_one("#words", OptionList)
@@ -513,6 +543,19 @@ class PyDictApp(App[None]):
         ))
         self._look_up(word)
         self.refresh_bindings()
+
+    def look_up_word_at(self, line: int, column: int) -> None:
+        """Look up the word at ``column`` of ``line`` of the definition (it was
+        double-clicked), keeping the way back like a followed cross reference.
+        """
+        lines = self.definition.split("\n")
+        if not 0 <= line < len(lines):
+            return
+        for match in WORD.finditer(lines[line]):
+            if match.start() <= column < match.end():
+                self.screen.clear_selection()
+                self.action_follow_link(match.group())
+                return
 
     def _look_up(self, query: str) -> None:
         """Search for ``query`` as if it had been typed."""
