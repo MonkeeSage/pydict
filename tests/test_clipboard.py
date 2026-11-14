@@ -47,12 +47,32 @@ def test_osc52_tmux_delegates() -> None:
 def test_tmux_check(monkeypatch: pytest.MonkeyPatch) -> None:
     answers = {}
     monkeypatch.setattr(clipboard, "_run", lambda args, timeout=2.0: answers[args[1]])
-    answers.update({"show-options": "external", "display-message": "focus,clipboard,RGB"})
+    answers.update({"show-options": "external",
+                    "display-message": "focus,clipboard,RGB\txterm-kitty\tkitty(0.36.4)"})
     assert clipboard.tmux_supports_osc52()
     answers.update({"show-options": "off"})
     assert not clipboard.tmux_supports_osc52()
-    answers.update({"show-options": "on", "display-message": "focus,RGB"})
+    answers.update({"show-options": "on", "display-message": "focus,RGB\txterm-kitty\tkitty(0.36.4)"})
     assert not clipboard.tmux_supports_osc52()
+
+
+@pytest.mark.parametrize(
+    ("info", "expected"),
+    [
+        ("clipboard\txterm-256color\tWezTerm 20240203", True),
+        ("clipboard\tfoot\t", True),  # tmux too old to report client_termtype
+        ("clipboard,RGB\txterm-256color\tKonsole 26.08.2", False),
+        ("clipboard\txterm-256color\tXTerm(390)", False),
+        ("clipboard\txterm-256color\t", False),
+        ("", False),
+    ],
+)
+def test_tmux_check_outer_terminal(
+    monkeypatch: pytest.MonkeyPatch, info: str, expected: bool
+) -> None:
+    answers = {"show-options": "external", "display-message": info}
+    monkeypatch.setattr(clipboard, "_run", lambda args, timeout=2.0: answers[args[1]])
+    assert clipboard.tmux_supports_osc52() is expected
 
 
 def test_system_commands_linux(monkeypatch: pytest.MonkeyPatch) -> None:

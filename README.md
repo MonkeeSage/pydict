@@ -76,9 +76,9 @@ To make startup fast, the index offsets of big dictionaries are cached in
 `ctrl+c` uses the OSC 52 terminal escape when the terminal is known to
 support it: kitty, WezTerm, foot, Alacritty, Ghostty, iTerm2, Windows
 Terminal, and tmux when its `set-clipboard` option is on and the outer
-terminal supports OSC 52. Otherwise it uses `wl-copy`, `xclip`, `xsel`,
-`pbcopy` or `clip`. Use `--clipboard osc52|system|auto` or `$PYDICT_CLIPBOARD`
-to override this. In browser mode, the copy goes to the browser's clipboard;
+terminal is one of these (except Windows Terminal, which tmux can't
+identify). Otherwise it uses `wl-copy`, `xclip`, `xsel`, `pbcopy` or `clip`.
+Use `--clipboard osc52|system|auto` or `$PYDICT_CLIPBOARD` to override this. In browser mode, the copy goes to the browser's clipboard;
 browsers only allow that on `localhost` or over HTTPS.
 
 ### Colors
