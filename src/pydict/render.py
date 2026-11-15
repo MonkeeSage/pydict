@@ -112,12 +112,18 @@ class _MarkupRenderer(HTMLParser):
         self.lists: list[int | None] = []  # item counter per <ol>, None for <ul>
         self.bol = True  # at the beginning of a line
         self.space = False  # output ends with a space
+        self.newlines = 0  # line breaks the output ends with
+        self.gap = False  # output ends with a blank line from _blank_line
 
     def _append(self, s: str, style: Style | str | None = None) -> None:
         if s:
             self.text.append(s, style)
             self.bol = s.endswith("\n")
             self.space = s.endswith(" ")
+            line = s.rstrip("\n")
+            self.newlines = (0 if line else self.newlines) + len(s) - len(line)
+            if line:
+                self.gap = False
 
     # -- output helpers ----------------------------------------------------
 
@@ -144,6 +150,19 @@ class _MarkupRenderer(HTMLParser):
     def _newline(self) -> None:
         if not self.bol:
             self._append("\n")
+
+    def _blank_line(self) -> None:
+        """End the line and leave a blank one (except at the start)."""
+        if self.text:
+            self._append("\n" * max(0, 2 - self.newlines))
+            self.gap = True
+
+    def _spaced(self, tag: str) -> bool:
+        """Whether an HTML block is set off by blank lines: paragraphs (such
+        as Wiktionary's part of speech headings), and each block in a quote
+        (its examples and quotations).
+        """
+        return tag == "p" or bool(self.stack) and self.stack[-1][0] == "blockquote"
 
     # -- parser callbacks --------------------------------------------------
 
@@ -182,7 +201,10 @@ class _MarkupRenderer(HTMLParser):
             self._newline()
             self.quote_depth += 1
         elif html and tag in _HTML_BLOCKS:
-            self._newline()
+            if self._spaced(tag):
+                self._blank_line()
+            else:
+                self._newline()
             if tag == "ul":
                 self.lists.append(None)
             elif tag == "ol":
@@ -236,11 +258,15 @@ class _MarkupRenderer(HTMLParser):
         elif self.kind == "h" and tag in _HTML_BLOCKS:
             if tag in ("ul", "ol") and self.lists:
                 self.lists.pop()
-            self._newline()
+            if self._spaced(tag):  # the stack's top is now the block's parent
+                self._blank_line()
+            else:
+                self._newline()
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag == "br":
-            self._append("\n")
+            if not self.gap:  # line breaks between spaced blocks add nothing
+                self._append("\n")
         elif tag == "hr":
             self._newline()
             self._append("─" * 20 + "\n", Style(dim=True))

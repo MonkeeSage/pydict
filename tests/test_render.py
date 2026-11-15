@@ -50,7 +50,24 @@ def test_html() -> None:
         "a<br>b<script>ignored()</script> &amp; <img alt='pic'>",
         "h",
     )
-    assert text.plain == "first para\n• one\n• two\n1. x\na\nb & [image: pic]"
+    assert text.plain == "first para\n\n• one\n• two\n1. x\na\nb & [image: pic]"
+
+
+def test_html_spacing() -> None:
+    # Wiktionary's layout: part of speech headings in paragraphs, and the
+    # examples and quotations of a sense in a quote.
+    text = render_markup(
+        "<div>Etymology</div><br><p><i>verb</i> <b>run</b></p>"
+        '<div class="sense"><b>1.</b> To move.<blockquote><div><i>Run!</i></div>'
+        "<div><small>1967, Someone:</small> <i>He ran.</i></div></blockquote></div>"
+        '<div class="sense"><b>2.</b> To flow.</div><br><p><i>noun</i> <b>run</b></p>'
+        "<p>first</p><br><br><p>second</p>a<br>b<br><br>c",
+        "h",
+    )
+    assert text.plain == (
+        "Etymology\n\nverb run\n\n1. To move.\n\n  Run!\n\n  1967, Someone: He ran.\n\n"
+        "2. To flow.\n\nnoun run\n\nfirst\n\nsecond\n\na\nb\n\nc"
+    )
 
 
 def test_bad_markup_does_not_crash() -> None:
