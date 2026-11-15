@@ -69,10 +69,15 @@ async def test_theme_follows_terminal_background(fruit_ifo: Path, background: st
         assert app.text_background == bg
 
 
+@pytest.mark.parametrize("web", [False, True])
 @pytest.mark.parametrize("focus_color", [None, "#d33682"])
-async def test_focus_color(fruit_ifo: Path, focus_color: str | None) -> None:
+async def test_focus_color(
+    fruit_ifo: Path, focus_color: str | None, web: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from textual.color import Color
 
+    # In a browser, no theme is set on mount to reread the CSS variables.
+    monkeypatch.setattr(PyDictApp, "is_web", property(lambda self: web))
     app = make_app(
         fruit_ifo, word="ap", focus_color=Color.parse(focus_color) if focus_color else None
     )
@@ -94,6 +99,22 @@ async def test_focus_color(fruit_ifo: Path, focus_color: str | None) -> None:
             assert widget.styles.border_top[1] == expected, selector
         scrollbar = app.query_one("#definition").styles.scrollbar_color_active
         assert scrollbar == Color.parse(focus_color or variables["primary"])
+
+
+@pytest.mark.parametrize("web", [False, True])
+async def test_quit_hint_not_in_browser(
+    fruit_ifo: Path, web: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(PyDictApp, "is_web", property(lambda self: web))
+    app = make_app(fruit_ifo, word="ap")
+    async with app.run_test() as pilot:
+        await settle(pilot, app)
+        shown = {key for key, active in app.active_bindings.items() if active.binding.show}
+        assert "ctrl+c" in shown
+        assert ("ctrl+q" in shown) != web
+        await pilot.press("ctrl+q")
+        await pilot.pause()
+        assert app.return_code is not None  # it still quits
 
 
 async def test_initial_word_and_fuzzy(fruit_ifo: Path) -> None:

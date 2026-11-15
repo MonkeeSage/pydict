@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_right
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from rich._wrap import divide_line
@@ -187,6 +187,9 @@ class PyDictApp(App[None]):
         focus_color: Color | None = None,
     ) -> None:
         mouse.install()  # before the driver starts parsing input
+        # Before App.__init__, which calls get_css_variables. In a terminal the
+        # theme set in on_mount would read it again, but not in a browser.
+        self.focus_color = focus_color  # border of the focused pane (--focus-color)
         super().__init__()
         # Textual applies $NO_COLOR itself, but also when it's empty, and with
         # a filter that keeps grey backgrounds. Remove all color instead, and
@@ -203,7 +206,6 @@ class PyDictApp(App[None]):
         self.warnings = warnings or []
         self.terminal_background = terminal_background
         self.terminal_foreground = terminal_foreground
-        self.focus_color = focus_color  # border of the focused pane (--focus-color)
         # The background definitions are drawn on; markup colors are made
         # readable against it.
         self.text_background = colors.DARK
@@ -228,8 +230,7 @@ class PyDictApp(App[None]):
 
     def get_css_variables(self) -> dict[str, str]:
         variables = super().get_css_variables()
-        # Called by App.__init__, before focus_color is set.
-        focus_color = getattr(self, "focus_color", None)
+        focus_color = self.focus_color
         variables[colors.FOCUS_BORDER_VARIABLE] = (
             focus_color.hex if focus_color else variables["accent"]
         )
@@ -262,6 +263,10 @@ class PyDictApp(App[None]):
     def on_mount(self) -> None:
         if self.is_web:
             self.text_background = Color.parse(self.get_css_variables()["background"])
+            # Browsers usually take ctrl+q themselves (closing the window), so
+            # don't offer it; it still quits if it gets through.
+            bindings = self._bindings.key_to_bindings
+            bindings["ctrl+q"] = [replace(b, show=False) for b in bindings.get("ctrl+q", [])]
         else:
             # Use the terminal's own background (see the :ansi rules in
             # app.tcss), with a theme whose colors are readable on it.

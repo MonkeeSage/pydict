@@ -39,7 +39,7 @@ definition of the highlighted word is shown on the right.
 | n / N (in the definition) | go to the next / previous match |
 | backspace (in the word list or definition) | go back to where the last cross reference was followed from |
 | ctrl+c | copy the displayed definition as plain text (only the text selected with the mouse, when the definition has focus) |
-| ctrl+q / escape | quit |
+| ctrl+q / escape | quit (in browser mode, ctrl+q isn't shown in the footer, since browsers usually use it to close the window) |
 
 Panes can also be focused with the mouse, and clicking a cross reference
 looks it up. Cross references are `bword://` links in HTML dictionaries and
